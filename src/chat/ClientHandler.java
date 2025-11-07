@@ -2,38 +2,77 @@ package chat;
 
 import java.io.*;
 import java.net.Socket;
-import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 
-class ClientHandler implements Runnable {
+public class ClientHandler implements Runnable {
+
     private final Socket socket;
-    private final List<PrintWriter> allClients;
-    private String nick = "(anon)";
+    private final ChatServer server;
+    private String nick; // nickname of this client
+    private PrintWriter out;
 
-    ClientHandler(Socket socket, List<PrintWriter> allClients) {
+    public ClientHandler(Socket socket, ChatServer server) {
         this.socket = socket;
-        this.allClients = allClients;
+        this.server = server;
     }
 
     @Override
     public void run() {
         try (
-                BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-                PrintWriter out = new PrintWriter(socket.getOutputStream(), true)
+                BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()))
         ) {
-            // TEMP: register writer so we can broadcast later
-            allClients.add(out);
+            out = new PrintWriter(socket.getOutputStream(), true);
 
-            // Step 1 behavior: just echo first line, then close
-            nick = in.readLine(); // later: validate nickname, etc.
-            System.out.println("[Server] Nick received: " + nick);
-            out.println("* hi " + nick + " (server says hello) *");
+            // 1️⃣ Read nickname (first line from client)
+            String requested = in.readLine();
+            if (requested == null) {
+                return; // client closed immediately
+            }
+            requested = requested.trim();
+
+            // Check if nickname is empty
+            if (requested.isEmpty()) {
+                out.println("* Nickname cannot be empty. Connection closed. *");
+                return;
+            }
+
+            // 2️⃣ Enforce unique nickname
+            ConcurrentHashMap<String, PrintWriter> clients = server.clients;
+            if (clients.putIfAbsent(requested, out) != null) {
+                out.println("* Nickname already in use. Try another. *");
+                return;
+            }
+
+            nick = requested; // nickname accepted
+            System.out.println("[Server] Nick registered: " + nick);
+            server.broadcast("* " + nick + " joined *");
+
+            // 3️⃣ Chat loop: read and broadcast
+            String line;
+            while ((line = in.readLine()) != null) {
+                String trimmed = line.trim();
+
+                if (trimmed.equalsIgnoreCase("/quit")) {
+                    break;
+                }
+
+                if (!trimmed.isEmpty()) {
+                    server.broadcast("[" + nick + "] " + line);
+                }
+            }
 
         } catch (IOException e) {
             System.err.println("[Server] Client error: " + e.getMessage());
         } finally {
-            // Cleanup
+            // 4️⃣ Cleanup
             try { socket.close(); } catch (IOException ignored) {}
-            System.out.println("[Server] Client disconnected: " + nick);
+
+            if (nick != null) {
+                server.clients.remove(nick);
+                server.broadcast("* " + nick + " left *");
+            }
+
+            System.out.println("[Server] Client disconnected: " + (nick == null ? "<unregistered>" : nick));
         }
     }
 }
