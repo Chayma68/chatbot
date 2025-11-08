@@ -23,7 +23,7 @@ public class ClientHandler implements Runnable {
         ) {
             out = new PrintWriter(socket.getOutputStream(), true);
 
-            // 1️⃣ Read nickname (first line from client)
+            // 1 Read nickname (first line from client)
             String requested = in.readLine();
             if (requested == null) {
                 return; // client closed immediately
@@ -36,7 +36,7 @@ public class ClientHandler implements Runnable {
                 return;
             }
 
-            // 2️⃣ Enforce unique nickname
+            // 2 Enforce unique nickname
             ConcurrentHashMap<String, PrintWriter> clients = server.clients;
             if (clients.putIfAbsent(requested, out) != null) {
                 out.println("* Nickname already in use. Try another. *");
@@ -45,9 +45,11 @@ public class ClientHandler implements Runnable {
 
             nick = requested; // nickname accepted
             System.out.println("[Server] Nick registered: " + nick);
-            server.broadcast("* " + nick + " joined *");
 
-            // 3️⃣ Chat loop: read and broadcast
+            server.sendTo(nick, "* you joined *");
+            server.broadcastExcept(nick, "* " + nick + " joined *");
+
+            // 3 Chat loop: read and broadcast
             String line;
             while ((line = in.readLine()) != null) {
                 String trimmed = line.trim();
@@ -56,20 +58,23 @@ public class ClientHandler implements Runnable {
                     break;
                 }
 
-                if (!trimmed.isEmpty()) {
-                    server.broadcast("[" + nick + "] " + line);
+                if (trimmed.isEmpty()) {
+                    continue;
                 }
+                server.sendTo(nick, "you: " + line);
+                server.broadcastExcept(nick, "[" + nick + "] " + line);
             }
 
         } catch (IOException e) {
             System.err.println("[Server] Client error: " + e.getMessage());
         } finally {
-            // 4️⃣ Cleanup
+            // 4 Cleanup
             try { socket.close(); } catch (IOException ignored) {}
 
             if (nick != null) {
                 server.clients.remove(nick);
-                server.broadcast("* " + nick + " left *");
+                server.sendTo(nick, "* you left *");
+                server.broadcastExcept(nick, "* " + nick + " left *");
             }
 
             System.out.println("[Server] Client disconnected: " + (nick == null ? "<unregistered>" : nick));

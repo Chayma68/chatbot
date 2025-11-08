@@ -39,4 +39,13 @@ public class ChatServer {
             pw.println(msg);
         }
     }
+    public void broadcastExcept(String exceptNick, String msg) {
+        clients.forEach((nick, pw) -> {
+            if (!nick.equals(exceptNick)) pw.println(msg);
+        });
+    }
+    public void sendTo(String nick, String msg) {
+        PrintWriter pw = clients.get(nick);
+        if (pw != null) pw.println(msg);
+    }
 }
